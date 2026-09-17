@@ -1,0 +1,218 @@
+:root {
+  --azul: #16324f;
+  --azul-claro: #2c567f;
+  --fundo: #f6f5f1;
+  --papel: #ffffff;
+  --texto: #23282c;
+  --texto-suave: #5b6570;
+  --linha: #dcdcd4;
+  --verde: #3f7d58;
+  --verde-fundo: #e7f1ea;
+  --vermelho: #a13f3f;
+  --vermelho-fundo: #f5e9e9;
+  --ambar: #b3801f;
+  --ambar-fundo: #fbf1de;
+  --raio: 3px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--fundo);
+  color: var(--texto);
+  font-family: "Public Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+h1, h2, h3 { font-weight: 700; margin: 0 0 .4em 0; letter-spacing: -0.01em; }
+h1 { font-size: 1.5rem; }
+h2 { font-size: 1.15rem; }
+h3 { font-size: 1rem; color: var(--texto-suave); font-weight: 600; }
+p { margin: 0 0 .8em 0; }
+
+a { color: var(--azul-claro); }
+
+button {
+  font-family: inherit;
+  font-size: 0.95rem;
+  cursor: pointer;
+  border: none;
+  border-radius: var(--raio);
+  padding: 0.65em 1.2em;
+  font-weight: 600;
+  transition: background .12s ease, transform .05s ease;
+}
+button:active { transform: translateY(1px); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+button.primario { background: var(--azul); color: #fff; }
+button.primario:hover:not(:disabled) { background: var(--azul-claro); }
+
+button.entrada { background: var(--verde); color: #fff; }
+button.entrada:hover:not(:disabled) { background: #356b49; }
+
+button.saida { background: var(--vermelho); color: #fff; }
+button.saida:hover:not(:disabled) { background: #8a3535; }
+
+button.secundario { background: transparent; color: var(--azul); border: 1px solid var(--linha); }
+button.secundario:hover:not(:disabled) { background: #ececE5; }
+
+button.link-like { background: none; color: var(--azul-claro); padding: 0; font-weight: 500; text-decoration: underline; }
+
+input, select {
+  font-family: inherit;
+  font-size: 0.95rem;
+  padding: 0.6em 0.7em;
+  border: 1px solid var(--linha);
+  border-radius: var(--raio);
+  background: var(--papel);
+  color: var(--texto);
+  width: 100%;
+}
+input:focus, select:focus, button:focus-visible {
+  outline: 2px solid var(--azul-claro);
+  outline-offset: 1px;
+}
+label { display: block; font-size: 0.85rem; color: var(--texto-suave); margin: 0 0 0.3em 0; font-weight: 600; }
+.campo { margin-bottom: 1em; }
+
+.oculto { display: none !important; }
+
+/* ---------- cabeçalho institucional ---------- */
+header.topo {
+  background: var(--azul);
+  color: #fff;
+  padding: 0.9em 1.4em;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1em;
+}
+.marca { display: flex; align-items: center; gap: 0.7em; }
+.brasao {
+  width: 34px; height: 34px; flex: none; color: currentColor;
+}
+.caixa-login .brasao, .cabecalho-impresso .brasao { color: var(--azul); display: block; margin-bottom: 0.5em; }
+.marca .titulo { display: flex; flex-direction: column; line-height: 1.15; }
+.marca .titulo strong { font-size: 1.05rem; }
+.marca .titulo span { font-size: 0.78rem; color: #b9c9d8; }
+.sessao-usuario { display: flex; align-items: center; gap: 0.9em; font-size: 0.9rem; }
+.sessao-usuario .nome-usuario { font-weight: 600; }
+.selo-admin {
+  background: var(--ambar-fundo); color: var(--ambar);
+  font-size: 0.72rem; font-weight: 700; padding: 0.15em 0.5em; border-radius: var(--raio);
+}
+
+/* ---------- layout geral ---------- */
+main.conteudo {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 1.6em 1.4em 4em 1.4em;
+}
+
+.cartao {
+  background: var(--papel);
+  border: 1px solid var(--linha);
+  border-radius: var(--raio);
+  padding: 1.4em;
+  margin-bottom: 1.3em;
+}
+
+nav.abas { display: flex; gap: 0.3em; border-bottom: 1px solid var(--linha); margin-bottom: 1.4em; flex-wrap: wrap; }
+nav.abas button {
+  background: none; color: var(--texto-suave); border-radius: 0;
+  padding: 0.7em 0.9em; font-weight: 600; border-bottom: 2px solid transparent;
+}
+nav.abas button.ativa { color: var(--azul); border-bottom-color: var(--azul); }
+nav.abas button:hover:not(.ativa) { color: var(--texto); }
+
+/* ---------- tela de login ---------- */
+.tela-login {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.4em;
+}
+.caixa-login {
+  background: var(--papel);
+  border: 1px solid var(--linha);
+  border-radius: var(--raio);
+  padding: 2.2em 2em;
+  max-width: 380px;
+  width: 100%;
+}
+.caixa-login .brasao { width: 46px; height: 46px; margin-bottom: 0.7em; }
+.caixa-login .subtitulo { color: var(--texto-suave); font-size: 0.9rem; margin-bottom: 1.4em; }
+.alternar-modo { text-align: center; margin-top: 1.1em; font-size: 0.88rem; color: var(--texto-suave); }
+.erro-login { background: var(--vermelho-fundo); color: var(--vermelho); padding: 0.7em 0.9em; border-radius: var(--raio); font-size: 0.88rem; margin-bottom: 1em; }
+
+/* ---------- relógio / bater ponto ---------- */
+.painel-relogio { text-align: center; padding: 0.6em 0 1.2em 0; }
+.relogio-grande { font-size: 2.6rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.data-hoje { color: var(--texto-suave); font-size: 0.95rem; margin-top: -0.2em; margin-bottom: 1.2em; text-transform: capitalize; }
+.status-jornada { font-size: 0.9rem; margin-bottom: 1em; padding: 0.5em 0.9em; border-radius: var(--raio); display: inline-block; }
+.status-jornada.dentro { background: var(--verde-fundo); color: var(--verde); }
+.status-jornada.fora { background: #ececE5; color: var(--texto-suave); }
+.botoes-ponto { display: flex; gap: 0.8em; justify-content: center; flex-wrap: wrap; }
+.botoes-ponto button { min-width: 160px; font-size: 1rem; padding: 0.85em 1.2em; }
+
+/* ---------- linha do tempo do dia ---------- */
+ul.linha-tempo { list-style: none; margin: 0; padding: 0; }
+ul.linha-tempo li {
+  display: flex; justify-content: space-between; gap: 1em;
+  padding: 0.6em 0; border-bottom: 1px solid var(--linha); font-size: 0.92rem;
+}
+ul.linha-tempo li:last-child { border-bottom: none; }
+.marcador { display: inline-flex; align-items: center; gap: 0.5em; font-weight: 600; }
+.ponto-cor { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.ponto-cor.entrada { background: var(--verde); }
+.ponto-cor.saida { background: var(--vermelho); }
+.atividade-registro { color: var(--texto-suave); }
+
+/* ---------- tabelas ---------- */
+table.tabela-relatorio { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+table.tabela-relatorio th, table.tabela-relatorio td { text-align: left; padding: 0.55em 0.6em; border-bottom: 1px solid var(--linha); }
+table.tabela-relatorio th { color: var(--texto-suave); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; }
+table.tabela-relatorio tr.linha-especial td { background: var(--ambar-fundo); }
+td.numero, th.numero { text-align: right; font-variant-numeric: tabular-nums; }
+
+.resumo-totais { display: flex; gap: 1.4em; flex-wrap: wrap; margin: 1em 0 1.4em 0; }
+.total-item { background: var(--fundo); border: 1px solid var(--linha); border-radius: var(--raio); padding: 0.8em 1.1em; min-width: 130px; }
+.total-item .rotulo { font-size: 0.76rem; color: var(--texto-suave); text-transform: uppercase; letter-spacing: 0.03em; }
+.total-item .valor { font-size: 1.3rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.total-item.destaque .valor { color: var(--ambar); }
+
+.linha-form { display: flex; gap: 1em; flex-wrap: wrap; align-items: flex-end; }
+.linha-form .campo { flex: 1; min-width: 160px; }
+
+.aviso { font-size: 0.85rem; color: var(--texto-suave); margin-top: 0.3em; }
+.mensagem-vazia { color: var(--texto-suave); font-size: 0.9rem; padding: 1em 0; }
+
+.lista-feriados { list-style: none; margin: 0.8em 0 0 0; padding: 0; }
+.lista-feriados li { display: flex; justify-content: space-between; align-items: center; padding: 0.45em 0; border-bottom: 1px solid var(--linha); font-size: 0.88rem; }
+.lista-feriados button.excluir { background: none; color: var(--vermelho); padding: 0.2em 0.5em; font-weight: 600; font-size: 0.82rem; }
+
+/* ---------- impressão ---------- */
+@media print {
+  header.topo, nav.abas, .nao-imprime { display: none !important; }
+  body { background: #fff; }
+  main.conteudo { max-width: 100%; padding: 0; margin: 0; }
+  .cartao { border: none; padding: 0; margin-bottom: 1.4em; }
+  .folha-relatorio { display: block !important; }
+}
+
+.folha-relatorio { display: none; }
+.folha-relatorio .cabecalho-impresso { border-bottom: 2px solid var(--azul); padding-bottom: 0.8em; margin-bottom: 1.2em; }
+.folha-relatorio .cabecalho-impresso h2 { color: var(--azul); }
+.folha-relatorio .assinatura { margin-top: 3em; display: flex; gap: 3em; }
+.folha-relatorio .assinatura div { flex: 1; border-top: 1px solid var(--texto); padding-top: 0.4em; font-size: 0.85rem; text-align: center; color: var(--texto-suave); }
+
+@media (max-width: 560px) {
+  .relogio-grande { font-size: 2.1rem; }
+  .botoes-ponto button { min-width: 130px; }
+  header.topo { padding: 0.8em 1em; }
+}
