@@ -63,23 +63,58 @@ function classificarDia(dataObj) {
   return { tipo: "normal", rotulo: "Dia útil" };
 }
 
-// Agrupa registros (entrada/saída) de um dia em pares e calcula horas
-function calcularDia(registrosDoDia) {
-  const ordenados = [...registrosDoDia].sort((a, b) => new Date(a.data_hora) - new Date(b.data_hora));
-  let minutosTrabalhados = 0;
+// Divide um intervalo [inicioDt, fimDt) em pedaços por dia de calendário —
+// é o que permite que uma jornada com pernoite conte as horas certas em cada dia.
+function dividirIntervaloPorDia(inicioDt, fimDt) {
+  const partes = [];
+  let cursor = new Date(inicioDt);
+  while (cursor < fimDt) {
+    const fimDoDia = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1, 0, 0, 0, 0);
+    const fimParte = fimDoDia < fimDt ? fimDoDia : fimDt;
+    partes.push({ chave: paraChaveData(cursor), minutos: (fimParte - cursor) / 60000 });
+    cursor = fimParte;
+  }
+  return partes;
+}
+
+// Agrupa TODOS os registros de um período (não só de um dia), forma os pares
+// entrada→saída em ordem cronológica e distribui as horas de cada par pelos
+// dias de calendário que ele atravessa — assim uma saída no dia seguinte
+// (pernoite) conta as horas de cada lado da meia-noite no dia certo.
+function calcularPeriodo(registrosOrdenados) {
+  const porDia = new Map();
+  const diaDe = (chave) => {
+    if (!porDia.has(chave)) porDia.set(chave, { minutos: 0, locais: new Set(), marcacoes: [], incompleto: false });
+    return porDia.get(chave);
+  };
+
+  for (const r of registrosOrdenados) {
+    diaDe(paraChaveData(new Date(r.data_hora))).marcacoes.push(r);
+  }
+
   let aberto = null;
-  const pares = [];
-  for (const r of ordenados) {
+  for (const r of registrosOrdenados) {
     if (r.tipo === "entrada") {
+      if (aberto) diaDe(paraChaveData(new Date(aberto.data_hora))).incompleto = true;
       aberto = r;
-    } else if (r.tipo === "saida" && aberto) {
-      const min = (new Date(r.data_hora) - new Date(aberto.data_hora)) / 60000;
-      minutosTrabalhados += Math.max(0, min);
-      pares.push({ entrada: aberto, saida: r });
+    } else if (r.tipo === "saida") {
+      if (!aberto) continue;
+      const inicioDt = new Date(aberto.data_hora);
+      const fimDt = new Date(r.data_hora);
+      if (fimDt > inicioDt) {
+        for (const parte of dividirIntervaloPorDia(inicioDt, fimDt)) {
+          const bucket = diaDe(parte.chave);
+          bucket.minutos += parte.minutos;
+          if (aberto.local) bucket.locais.add(aberto.local);
+          if (r.local) bucket.locais.add(r.local);
+        }
+      }
       aberto = null;
     }
   }
-  return { minutosTrabalhados, incompleto: aberto !== null, pares, registros: ordenados };
+  if (aberto) diaDe(paraChaveData(new Date(aberto.data_hora))).incompleto = true;
+
+  return porDia;
 }
 
 function calcularExtras(horasTrabalhadas, tipoDia) {
@@ -107,13 +142,35 @@ async function carregarFuncionarios() {
 async function buscarRegistrosPeriodo(funcionarioId, dataInicio, dataFim) {
   const { data, error } = await sb
     .from("registros_ponto")
-    .select("id, tipo, data_hora, atividade")
+    .select("id, tipo, data_hora, atividade, local")
     .eq("funcionario_id", funcionarioId)
     .gte("data_hora", `${dataInicio}T00:00:00`)
     .lte("data_hora", `${dataFim}T23:59:59.999`)
     .order("data_hora");
   if (error) { console.error(error); return []; }
   return data;
+}
+
+async function buscarUltimosRegistros(funcionarioId, limite = 8) {
+  const { data, error } = await sb
+    .from("registros_ponto")
+    .select("id, tipo, data_hora, atividade, local")
+    .eq("funcionario_id", funcionarioId)
+    .order("data_hora", { ascending: false })
+    .limit(limite);
+  if (error) { console.error(error); return []; }
+  return data;
+}
+
+async function buscarLocaisConhecidos() {
+  const { data, error } = await sb
+    .from("registros_ponto")
+    .select("local")
+    .not("local", "is", null)
+    .order("data_hora", { ascending: false })
+    .limit(200);
+  if (error) { console.error(error); return []; }
+  return [...new Set(data.map(r => r.local).filter(Boolean))].slice(0, 25);
 }
 
 // ---------- Autenticação ----------
@@ -140,10 +197,19 @@ async function tentarCadastro(nome, usuario, senha) {
 }
 
 // ---------- Registro de ponto ----------
-async function registrarPonto(tipo, atividade) {
+function agoraParaDatetimeLocal() {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+async function registrarPonto(tipo, dataHoraLocal, local, atividade) {
+  const dataHora = new Date(dataHoraLocal);
+  if (isNaN(dataHora.getTime())) { alert("Data e hora inválidas."); return false; }
   const { error } = await sb.from("registros_ponto").insert({
     funcionario_id: sessao.id,
     tipo,
+    data_hora: dataHora.toISOString(),
+    local: local?.trim() || null,
     atividade: atividade?.trim() || null,
   });
   if (error) { alert("Não foi possível registrar. Verifique sua conexão e tente novamente."); return false; }
@@ -276,19 +342,39 @@ async function renderizarAbaPonto() {
         <div class="relogio-grande" id="relogio-hora">--:--:--</div>
         <div class="data-hoje" id="relogio-data"></div>
         <div id="status-jornada"></div>
-        <div class="campo" style="max-width:420px;margin:0 auto 1em auto;text-align:left">
-          <label for="campo-atividade">Atividade realizada (opcional)</label>
-          <input id="campo-atividade" placeholder="ex.: vistoria na obra da Rua XV">
-        </div>
-        <div class="botoes-ponto">
-          <button class="entrada" id="btn-entrada">Registrar Entrada</button>
-          <button class="saida" id="btn-saida">Registrar Saída</button>
-        </div>
       </div>
+      <form id="form-registro">
+        <div class="linha-form">
+          <div class="campo" style="max-width:150px">
+            <label for="reg-tipo">Tipo</label>
+            <select id="reg-tipo">
+              <option value="entrada">Entrada</option>
+              <option value="saida">Saída</option>
+            </select>
+          </div>
+          <div class="campo">
+            <label for="reg-datahora">Data e hora</label>
+            <input type="datetime-local" id="reg-datahora" required>
+          </div>
+        </div>
+        <div class="linha-form">
+          <div class="campo">
+            <label for="reg-local">Local</label>
+            <input id="reg-local" list="locais-conhecidos" placeholder="ex.: Sede da Prefeitura, obra da Rua XV">
+            <datalist id="locais-conhecidos"></datalist>
+          </div>
+          <div class="campo">
+            <label for="reg-atividade">Atividade realizada (opcional)</label>
+            <input id="reg-atividade" placeholder="ex.: vistoria na obra">
+          </div>
+        </div>
+        <p class="aviso">Em caso de pernoite, registre a saída com a data em que a pessoa efetivamente retornou — as horas são contadas em cada dia correspondente, antes e depois da meia-noite.</p>
+        <button type="submit" class="primario">Registrar</button>
+      </form>
     </div>
     <div class="cartao">
-      <h2>Hoje</h2>
-      <div id="linha-tempo-hoje"><p class="mensagem-vazia">Carregando…</p></div>
+      <h2>Últimos registros</h2>
+      <div id="lista-ultimos-registros"><p class="mensagem-vazia">Carregando…</p></div>
     </div>
   `;
 
@@ -301,52 +387,55 @@ async function renderizarAbaPonto() {
   atualizarRelogio();
   intervaloRelogio = setInterval(atualizarRelogio, 1000);
 
-  await atualizarPainelHoje();
-
-  document.getElementById("btn-entrada").addEventListener("click", async () => {
-    const atividade = document.getElementById("campo-atividade").value;
-    document.getElementById("btn-entrada").disabled = true;
-    const ok = await registrarPonto("entrada", atividade);
-    if (ok) { document.getElementById("campo-atividade").value = ""; await atualizarPainelHoje(); }
-    else document.getElementById("btn-entrada").disabled = false;
+  document.getElementById("reg-datahora").value = agoraParaDatetimeLocal();
+  buscarLocaisConhecidos().then(locais => {
+    const dl = document.getElementById("locais-conhecidos");
+    if (dl) dl.innerHTML = locais.map(l => `<option value="${escaparHtml(l)}">`).join("");
   });
-  document.getElementById("btn-saida").addEventListener("click", async () => {
-    const atividade = document.getElementById("campo-atividade").value;
-    document.getElementById("btn-saida").disabled = true;
-    const ok = await registrarPonto("saida", atividade);
-    if (ok) { document.getElementById("campo-atividade").value = ""; await atualizarPainelHoje(); }
-    else document.getElementById("btn-saida").disabled = false;
+  await atualizarStatusEUltimos();
+
+  document.getElementById("form-registro").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const tipo = document.getElementById("reg-tipo").value;
+    const dataHora = document.getElementById("reg-datahora").value;
+    const local = document.getElementById("reg-local").value;
+    const atividade = document.getElementById("reg-atividade").value;
+    const botao = ev.target.querySelector("button[type=submit]");
+    botao.disabled = true;
+    const ok = await registrarPonto(tipo, dataHora, local, atividade);
+    botao.disabled = false;
+    if (ok) {
+      document.getElementById("reg-atividade").value = "";
+      document.getElementById("reg-local").value = "";
+      document.getElementById("reg-datahora").value = agoraParaDatetimeLocal();
+      await atualizarStatusEUltimos();
+    }
   });
 }
 
-async function atualizarPainelHoje() {
-  const hoje = paraChaveData(new Date());
-  const registros = await buscarRegistrosPeriodo(sessao.id, hoje, hoje);
-  const ultimoTipo = registros.length ? registros[registros.length - 1].tipo : null;
+async function atualizarStatusEUltimos() {
+  const ultimos = await buscarUltimosRegistros(sessao.id, 8);
+  const ultimoTipo = ultimos.length ? ultimos[0].tipo : null;
 
   const statusEl = document.getElementById("status-jornada");
   if (statusEl) {
     if (ultimoTipo === "entrada") {
-      statusEl.innerHTML = `<span class="status-jornada dentro">Dentro do expediente desde ${formatarHora(registros[registros.length - 1].data_hora)}</span>`;
+      statusEl.innerHTML = `<span class="status-jornada dentro">Dentro do expediente desde ${formatarDataCurta(paraChaveData(new Date(ultimos[0].data_hora)))} ${formatarHora(ultimos[0].data_hora)}</span>`;
     } else {
       statusEl.innerHTML = `<span class="status-jornada fora">Fora do expediente</span>`;
     }
   }
-  const btnEntrada = document.getElementById("btn-entrada");
-  const btnSaida = document.getElementById("btn-saida");
-  if (btnEntrada && btnSaida) {
-    btnEntrada.disabled = ultimoTipo === "entrada";
-    btnSaida.disabled = ultimoTipo !== "entrada";
-  }
+  const selTipo = document.getElementById("reg-tipo");
+  if (selTipo) selTipo.value = ultimoTipo === "entrada" ? "saida" : "entrada";
 
-  const lista = document.getElementById("linha-tempo-hoje");
-  if (!registros.length) {
-    lista.innerHTML = `<p class="mensagem-vazia">Nenhum registro hoje ainda.</p>`;
+  const lista = document.getElementById("lista-ultimos-registros");
+  if (!ultimos.length) {
+    lista.innerHTML = `<p class="mensagem-vazia">Nenhum registro ainda.</p>`;
     return;
   }
-  lista.innerHTML = `<ul class="linha-tempo">${registros.map(r => `
+  lista.innerHTML = `<ul class="linha-tempo">${ultimos.map(r => `
     <li>
-      <span class="marcador"><span class="ponto-cor ${r.tipo}"></span>${r.tipo === "entrada" ? "Entrada" : "Saída"} — ${formatarHora(r.data_hora)}</span>
+      <span class="marcador"><span class="ponto-cor ${r.tipo}"></span>${r.tipo === "entrada" ? "Entrada" : "Saída"} — ${formatarDataCurta(paraChaveData(new Date(r.data_hora)))} ${formatarHora(r.data_hora)}${r.local ? " · " + escaparHtml(r.local) : ""}</span>
       <span class="atividade-registro">${r.atividade ? escaparHtml(r.atividade) : ""}</span>
     </li>`).join("")}</ul>`;
 }
@@ -392,28 +481,26 @@ async function gerarRelatorio() {
   if (!inicio || !fim || inicio > fim) { resultadoEl.innerHTML = `<p class="mensagem-vazia">Escolha um período válido.</p>`; return; }
 
   const registros = await buscarRegistrosPeriodo(contextoRelatorio.funcionarioId, inicio, fim);
-  const porDia = new Map();
-  for (const r of registros) {
-    const chave = paraChaveData(new Date(r.data_hora));
-    if (!porDia.has(chave)) porDia.set(chave, []);
-    porDia.get(chave).push(r);
-  }
+  const ordenados = [...registros].sort((a, b) => new Date(a.data_hora) - new Date(b.data_hora));
+  const porDia = calcularPeriodo(ordenados);
 
   const linhas = [];
   let totalNormal = 0, totalExtra50 = 0, totalExtra100 = 0;
   let temPendencia = false;
 
-  for (const [chave, regsDia] of [...porDia.entries()].sort()) {
+  for (const [chave, info] of [...porDia.entries()].sort()) {
+    if (chave < inicio || chave > fim) continue;
     const [a, m, di] = chave.split("-").map(Number);
     const dataObj = new Date(a, m - 1, di);
     const classe = classificarDia(dataObj);
-    const { minutosTrabalhados, incompleto } = calcularDia(regsDia);
-    const horas = minutosTrabalhados / 60;
+    const horas = info.minutos / 60;
     const extras = calcularExtras(horas, classe.tipo);
     totalNormal += extras.normal; totalExtra50 += extras.extra50; totalExtra100 += extras.extra100;
-    if (incompleto) temPendencia = true;
+    if (info.incompleto) temPendencia = true;
+    const regsDia = [...info.marcacoes].sort((x, y) => new Date(x.data_hora) - new Date(y.data_hora));
     const atividades = regsDia.filter(r => r.atividade).map(r => r.atividade);
-    linhas.push({ chave, dataObj, classe, regsDia, horas, extras, incompleto, atividades });
+    const locais = [...info.locais];
+    linhas.push({ chave, dataObj, classe, regsDia, horas, extras, incompleto: info.incompleto, atividades, locais });
   }
 
   if (!linhas.length) {
@@ -432,7 +519,7 @@ async function gerarRelatorio() {
     ${temPendencia ? `<p class="aviso">Há dias com entrada sem saída registrada — essas horas não entraram no cálculo.</p>` : ""}
     <table class="tabela-relatorio">
       <thead><tr>
-        <th>Data</th><th>Dia</th><th>Marcações</th><th>Atividade</th>
+        <th>Data</th><th>Dia</th><th>Marcações</th><th>Local</th><th>Atividade</th>
         <th class="numero">Trabalhado</th><th class="numero">Extra 50%</th><th class="numero">Extra 100%</th>
         ${sessao.is_admin ? "<th></th>" : ""}
       </tr></thead>
@@ -442,11 +529,12 @@ async function gerarRelatorio() {
             <td>${formatarDataCurta(l.chave)}</td>
             <td>${l.classe.tipo === "normal" ? DIAS_SEMANA[l.dataObj.getDay()] : l.classe.rotulo}</td>
             <td>${l.regsDia.map(r => `${r.tipo === "entrada" ? "E" : "S"} ${formatarHora(r.data_hora)}`).join(" · ")}${l.incompleto ? " (aberto)" : ""}</td>
+            <td>${l.locais.map(escaparHtml).join("; ") || "—"}</td>
             <td>${l.atividades.map(escaparHtml).join("; ")}</td>
             <td class="numero">${horasParaTexto(l.horas)}</td>
             <td class="numero">${l.extras.extra50 > 0 ? horasParaTexto(l.extras.extra50) : "—"}</td>
             <td class="numero">${l.extras.extra100 > 0 ? horasParaTexto(l.extras.extra100) : "—"}</td>
-            ${sessao.is_admin ? `<td><button class="link-like" data-excluir-dia="${l.chave}">excluir dia</button></td>` : ""}
+            ${sessao.is_admin ? `<td><button class="link-like" data-excluir-dia="${l.chave}">excluir marcações</button></td>` : ""}
           </tr>`).join("")}
       </tbody>
     </table>
@@ -460,9 +548,10 @@ async function gerarRelatorio() {
     resultadoEl.querySelectorAll("[data-excluir-dia]").forEach(btn => {
       btn.addEventListener("click", async () => {
         const chave = btn.dataset.excluirDia;
-        if (!confirm(`Excluir todos os registros de ${formatarDataCurta(chave)}? Essa ação não pode ser desfeita.`)) return;
-        const regsDoDia = porDia.get(chave) || [];
-        await sb.from("registros_ponto").delete().in("id", regsDoDia.map(r => r.id));
+        if (!confirm(`Excluir as marcações feitas em ${formatarDataCurta(chave)}? Se fizerem parte de uma jornada com pernoite, a outra ponta (em outro dia) não será apagada. Essa ação não pode ser desfeita.`)) return;
+        const info = porDia.get(chave);
+        const ids = (info?.marcacoes || []).map(r => r.id);
+        if (ids.length) await sb.from("registros_ponto").delete().in("id", ids);
         await gerarRelatorio();
       });
     });
@@ -480,7 +569,7 @@ function montarFolhaImpressao(inicio, fim, linhas, totais) {
     </div>
     <table class="tabela-relatorio">
       <thead><tr>
-        <th>Data</th><th>Dia</th><th>Marcações</th><th>Atividade</th>
+        <th>Data</th><th>Dia</th><th>Marcações</th><th>Local</th><th>Atividade</th>
         <th class="numero">Trabalhado</th><th class="numero">Extra 50%</th><th class="numero">Extra 100%</th>
       </tr></thead>
       <tbody>
@@ -489,6 +578,7 @@ function montarFolhaImpressao(inicio, fim, linhas, totais) {
             <td>${formatarDataCurta(l.chave)}</td>
             <td>${l.classe.tipo === "normal" ? DIAS_SEMANA[l.dataObj.getDay()] : l.classe.rotulo}</td>
             <td>${l.regsDia.map(r => `${r.tipo === "entrada" ? "E" : "S"} ${formatarHora(r.data_hora)}`).join(" · ")}${l.incompleto ? " (aberto)" : ""}</td>
+            <td>${l.locais.map(escaparHtml).join("; ") || "—"}</td>
             <td>${l.atividades.map(escaparHtml).join("; ")}</td>
             <td class="numero">${horasParaTexto(l.horas)}</td>
             <td class="numero">${l.extras.extra50 > 0 ? horasParaTexto(l.extras.extra50) : "—"}</td>
@@ -496,7 +586,7 @@ function montarFolhaImpressao(inicio, fim, linhas, totais) {
           </tr>`).join("")}
       </tbody>
       <tfoot>
-        <tr><td colspan="4"><strong>Totais</strong></td>
+        <tr><td colspan="5"><strong>Totais</strong></td>
           <td class="numero"><strong>${horasParaTexto(totais.totalNormal)}</strong></td>
           <td class="numero"><strong>${horasParaTexto(totais.totalExtra50)}</strong></td>
           <td class="numero"><strong>${horasParaTexto(totais.totalExtra100)}</strong></td>
