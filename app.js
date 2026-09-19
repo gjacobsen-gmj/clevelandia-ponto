@@ -343,7 +343,12 @@ async function renderizarApp() {
   raiz.querySelectorAll("[data-botao-instalar]").forEach((btn) => btn.addEventListener("click", acionarInstalacao));
   atualizarBotaoInstalar();
   raiz.querySelectorAll("nav.abas button").forEach(b => {
-    b.addEventListener("click", () => { abaAtiva = b.dataset.aba; atualizarAbaAtiva(); renderizarAba(); });
+    b.addEventListener("click", () => {
+      abaAtiva = b.dataset.aba;
+      if (abaAtiva === "relatorio") contextoRelatorio = { funcionarioId: sessao.id, nome: sessao.nome };
+      atualizarAbaAtiva();
+      renderizarAba();
+    });
   });
   await Promise.all([carregarFeriados(), sessao.is_admin ? carregarFuncionarios() : Promise.resolve()]);
   atualizarAbaAtiva();
@@ -356,7 +361,7 @@ function atualizarAbaAtiva() {
 
 function renderizarAba() {
   if (abaAtiva === "ponto") return renderizarAbaPonto();
-  if (abaAtiva === "relatorio") { contextoRelatorio = { funcionarioId: sessao.id, nome: sessao.nome }; return renderizarAbaRelatorio(); }
+  if (abaAtiva === "relatorio") return renderizarAbaRelatorio();
   if (abaAtiva === "equipe") return renderizarAbaEquipe();
   if (abaAtiva === "feriados") return renderizarAbaFeriados();
 }
