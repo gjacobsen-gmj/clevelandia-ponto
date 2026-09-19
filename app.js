@@ -14,6 +14,29 @@ let feriadosCache = new Map(); // "yyyy-mm-dd" -> descrição
 let abaAtiva = "ponto";
 let funcionariosCache = [];
 let contextoRelatorio = null; // { funcionarioId, nome } — quem está sendo relatado
+let promptInstalacao = null; // evento beforeinstallprompt guardado para disparar sob clique
+
+window.addEventListener("beforeinstallprompt", (ev) => {
+  ev.preventDefault();
+  promptInstalacao = ev;
+  atualizarBotaoInstalar();
+});
+window.addEventListener("appinstalled", () => {
+  promptInstalacao = null;
+  atualizarBotaoInstalar();
+});
+function atualizarBotaoInstalar() {
+  document.querySelectorAll("[data-botao-instalar]").forEach((btn) => {
+    btn.classList.toggle("oculto", !promptInstalacao);
+  });
+}
+async function acionarInstalacao() {
+  if (!promptInstalacao) return;
+  promptInstalacao.prompt();
+  await promptInstalacao.userChoice;
+  promptInstalacao = null;
+  atualizarBotaoInstalar();
+}
 
 // ---------- Sessão local ----------
 function carregarSessao() {
@@ -254,12 +277,15 @@ function renderizarLogin(erro = "", modo = "entrar") {
             ? `Já tem cadastro? <button class="link-like" id="ir-entrar">Entrar</button>`
             : `Primeiro acesso? <button class="link-like" id="ir-cadastrar">Cadastre-se</button>`}
         </div>
+        <button class="secundario oculto" data-botao-instalar style="width:100%;margin-top:1em">Instalar aplicativo</button>
       </div>
     </div>
   `;
 
   document.getElementById("ir-cadastrar")?.addEventListener("click", () => renderizarLogin("", "cadastrar"));
   document.getElementById("ir-entrar")?.addEventListener("click", () => renderizarLogin("", "entrar"));
+  raiz.querySelectorAll("[data-botao-instalar]").forEach((btn) => btn.addEventListener("click", acionarInstalacao));
+  atualizarBotaoInstalar();
 
   document.getElementById("form-auth").addEventListener("submit", async (ev) => {
     ev.preventDefault();
@@ -297,6 +323,7 @@ async function renderizarApp() {
         </div>
       </div>
       <div class="sessao-usuario">
+        <button class="secundario oculto" data-botao-instalar>Instalar app</button>
         <span class="nome-usuario">${escaparHtml(sessao.nome)}</span>
         ${sessao.is_admin ? `<span class="selo-admin">admin</span>` : ""}
         <button class="secundario" id="btn-sair">Sair</button>
@@ -313,6 +340,8 @@ async function renderizarApp() {
     </main>
   `;
   document.getElementById("btn-sair").addEventListener("click", encerrarSessao);
+  raiz.querySelectorAll("[data-botao-instalar]").forEach((btn) => btn.addEventListener("click", acionarInstalacao));
+  atualizarBotaoInstalar();
   raiz.querySelectorAll("nav.abas button").forEach(b => {
     b.addEventListener("click", () => { abaAtiva = b.dataset.aba; atualizarAbaAtiva(); renderizarAba(); });
   });
