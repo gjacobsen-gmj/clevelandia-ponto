@@ -101,6 +101,8 @@ header.topo {
 .marca .titulo span { font-size: 0.78rem; color: #b9c9d8; }
 .sessao-usuario { display: flex; align-items: center; gap: 0.9em; font-size: 0.9rem; }
 .sessao-usuario .nome-usuario { font-weight: 600; }
+header.topo button.secundario { color: #fff; border-color: rgba(255, 255, 255, 0.4); }
+header.topo button.secundario:hover:not(:disabled) { background: rgba(255, 255, 255, 0.12); }
 .selo-admin {
   background: var(--ambar-fundo); color: var(--ambar);
   font-size: 0.72rem; font-weight: 700; padding: 0.15em 0.5em; border-radius: var(--raio);
