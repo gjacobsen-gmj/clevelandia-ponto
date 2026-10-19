@@ -180,6 +180,28 @@ async function definirRegime(funcionarioId, regime) {
   return true;
 }
 
+// Regime escolhido para cada dia (tabela regime_dia). Dia sem escolha usa o regime padrão do funcionário.
+async function buscarRegimesDia(funcionarioId, dataInicio, dataFim) {
+  const { data, error } = await sb.from("regime_dia").select("data, regime_horas")
+    .eq("funcionario_id", funcionarioId).gte("data", dataInicio).lte("data", dataFim);
+  if (error) { console.error(error); return new Map(); }
+  return new Map(data.map(r => [r.data, regimeValido(r.regime_horas)]));
+}
+
+async function buscarRegimeDoDia(funcionarioId, chaveData) {
+  const { data } = await sb.from("regime_dia").select("regime_horas")
+    .eq("funcionario_id", funcionarioId).eq("data", chaveData).maybeSingle();
+  return data ? regimeValido(data.regime_horas) : null;
+}
+
+async function definirRegimeDia(funcionarioId, chaveData, regime) {
+  const { error } = await sb.from("regime_dia").upsert(
+    { funcionario_id: funcionarioId, data: chaveData, regime_horas: regimeValido(regime), atualizado_em: new Date().toISOString() },
+    { onConflict: "funcionario_id,data" });
+  if (error) { console.error(error); alert("Não foi possível salvar o regime desse dia. Tente novamente."); return false; }
+  return true;
+}
+
 async function buscarRegistrosPeriodo(funcionarioId, dataInicio, dataFim) {
   const { data, error } = await sb
     .from("registros_ponto")
@@ -352,7 +374,7 @@ async function renderizarApp() {
       </div>
       <div class="sessao-usuario">
         <button class="secundario oculto" data-botao-instalar>Instalar app</button>
-        <label class="regime-topo" for="sel-regime">Regime
+        <label class="regime-topo" for="sel-regime" title="Regime padrão: usado nos dias em que você não escolher outro ao registrar o ponto">Regime padrão
           <select id="sel-regime">
             ${REGIMES_HORAS.map(h => `<option value="${h}" ${regimeValido(sessao.regime_horas) === h ? "selected" : ""}>${h}h/dia</option>`).join("")}
           </select>
@@ -432,6 +454,12 @@ async function renderizarAbaPonto() {
             <label for="reg-datahora">Data e hora</label>
             <input type="datetime-local" id="reg-datahora" required>
           </div>
+          <div class="campo" style="max-width:170px">
+            <label for="reg-regime">Regime neste dia</label>
+            <select id="reg-regime">
+              ${REGIMES_HORAS.map(h => `<option value="${h}">${h} horas diárias</option>`).join("")}
+            </select>
+          </div>
         </div>
         <div class="linha-form">
           <div class="campo">
@@ -466,6 +494,17 @@ async function renderizarAbaPonto() {
   intervaloRelogio = setInterval(atualizarRelogio, 1000);
 
   document.getElementById("reg-datahora").value = agoraParaDatetimeLocal();
+
+  // Ao mudar a data, mostra o regime já escolhido para aquele dia (ou o padrão da pessoa).
+  const atualizarRegimeDoDia = async () => {
+    const valor = document.getElementById("reg-datahora").value;
+    const sel = document.getElementById("reg-regime");
+    if (!valor || !sel) return;
+    const existente = await buscarRegimeDoDia(sessao.id, valor.slice(0, 10));
+    sel.value = String(existente ?? regimeValido(sessao.regime_horas));
+  };
+  document.getElementById("reg-datahora").addEventListener("change", atualizarRegimeDoDia);
+  atualizarRegimeDoDia();
   buscarLocaisConhecidos().then(locais => {
     const dl = document.getElementById("locais-conhecidos");
     if (dl) dl.innerHTML = locais.map(l => `<option value="${escaparHtml(l)}">`).join("");
@@ -480,12 +519,15 @@ async function renderizarAbaPonto() {
     const atividade = document.getElementById("reg-atividade").value;
     const botao = ev.target.querySelector("button[type=submit]");
     botao.disabled = true;
+    const regimeDia = document.getElementById("reg-regime").value;
     const ok = await registrarPonto(tipo, dataHora, local, atividade);
+    if (ok) await definirRegimeDia(sessao.id, dataHora.slice(0, 10), regimeDia);
     botao.disabled = false;
     if (ok) {
       document.getElementById("reg-atividade").value = "";
       document.getElementById("reg-local").value = "";
       document.getElementById("reg-datahora").value = agoraParaDatetimeLocal();
+      atualizarRegimeDoDia();
       await atualizarStatusEUltimos();
     }
   });
@@ -558,7 +600,8 @@ async function gerarRelatorio() {
   const resultadoEl = document.getElementById("resultado-relatorio");
   if (!inicio || !fim || inicio > fim) { resultadoEl.innerHTML = `<p class="mensagem-vazia">Escolha um período válido.</p>`; return; }
 
-  const regime = await buscarRegime(contextoRelatorio.funcionarioId);
+  const regimePadrao = await buscarRegime(contextoRelatorio.funcionarioId);
+  const regimesDia = await buscarRegimesDia(contextoRelatorio.funcionarioId, inicio, fim);
   const registros = await buscarRegistrosPeriodo(contextoRelatorio.funcionarioId, inicio, fim);
   const ordenados = [...registros].sort((a, b) => new Date(a.data_hora) - new Date(b.data_hora));
   const porDia = calcularPeriodo(ordenados);
@@ -573,13 +616,14 @@ async function gerarRelatorio() {
     const dataObj = new Date(a, m - 1, di);
     const classe = classificarDia(dataObj);
     const horas = info.minutos / 60;
+    const regime = regimesDia.get(chave) ?? regimePadrao;
     const extras = calcularExtras(horas, classe.tipo, regime);
     totalNormal += extras.normal; totalExtra50 += extras.extra50; totalExtra100 += extras.extra100;
     if (info.incompleto) temPendencia = true;
     const regsDia = [...info.marcacoes].sort((x, y) => new Date(x.data_hora) - new Date(y.data_hora));
     const atividades = regsDia.filter(r => r.atividade).map(r => r.atividade);
     const locais = [...info.locais];
-    linhas.push({ chave, dataObj, classe, regsDia, horas, extras, incompleto: info.incompleto, atividades, locais });
+    linhas.push({ chave, dataObj, classe, regsDia, horas, extras, regime, definido: regimesDia.has(chave), incompleto: info.incompleto, atividades, locais });
   }
 
   if (!linhas.length) {
@@ -598,7 +642,7 @@ async function gerarRelatorio() {
     ${temPendencia ? `<p class="aviso">Há dias com entrada sem saída registrada — essas horas não entraram no cálculo.</p>` : ""}
     <table class="tabela-relatorio">
       <thead><tr>
-        <th>Data</th><th>Dia</th><th>Marcações</th><th>Local</th><th>Atividade</th>
+        <th>Data</th><th>Dia</th><th>Marcações</th><th>Local</th><th>Atividade</th><th>Regime</th>
         <th class="numero">Trabalhado</th><th class="numero">Extra 50%</th><th class="numero">Extra 100%</th>
         ${sessao.is_admin ? "<th></th>" : ""}
       </tr></thead>
@@ -610,6 +654,11 @@ async function gerarRelatorio() {
             <td>${l.regsDia.map(r => `${r.tipo === "entrada" ? "E" : "S"} ${formatarHora(r.data_hora)}`).join(" · ")}${l.incompleto ? " (aberto)" : ""}</td>
             <td>${l.locais.map(escaparHtml).join("; ") || "—"}</td>
             <td>${l.atividades.map(escaparHtml).join("; ")}</td>
+            <td>
+              <select data-regime-dia="${l.chave}" aria-label="Regime em ${formatarDataCurta(l.chave)}" title="${l.definido ? "Regime escolhido para este dia" : "Dia sem escolha: usando o regime padrão"}">
+                ${REGIMES_HORAS.map(h => `<option value="${h}" ${l.regime === h ? "selected" : ""}>${h}h</option>`).join("")}
+              </select>
+            </td>
             <td class="numero">${horasParaTexto(l.horas)}</td>
             <td class="numero">${l.extras.extra50 > 0 ? horasParaTexto(l.extras.extra50) : "—"}</td>
             <td class="numero">${l.extras.extra100 > 0 ? horasParaTexto(l.extras.extra100) : "—"}</td>
@@ -620,8 +669,16 @@ async function gerarRelatorio() {
     <button class="primario nao-imprime" id="btn-imprimir" style="margin-top:1.2em">Gerar relatório para impressão</button>
   `;
 
-  montarFolhaImpressao(inicio, fim, linhas, { totalNormal, totalExtra50, totalExtra100 }, regime);
+  montarFolhaImpressao(inicio, fim, linhas, { totalNormal, totalExtra50, totalExtra100 });
   document.getElementById("btn-imprimir").addEventListener("click", () => window.print());
+
+  resultadoEl.querySelectorAll("[data-regime-dia]").forEach(sel => {
+    sel.addEventListener("change", async () => {
+      sel.disabled = true;
+      const ok = await definirRegimeDia(contextoRelatorio.funcionarioId, sel.dataset.regimeDia, sel.value);
+      if (ok) await gerarRelatorio(); else sel.disabled = false;
+    });
+  });
 
   if (sessao.is_admin) {
     resultadoEl.querySelectorAll("[data-excluir-dia]").forEach(btn => {
@@ -637,18 +694,18 @@ async function gerarRelatorio() {
   }
 }
 
-function montarFolhaImpressao(inicio, fim, linhas, totais, regime) {
+function montarFolhaImpressao(inicio, fim, linhas, totais) {
   const folha = document.getElementById("folha-impressao");
   folha.innerHTML = `
     <div class="cabecalho-impresso">
       ${svgBrasao(34)}
       <h2>Relatório de Ponto</h2>
       <p>Município de Clevelândia — PR</p>
-      <p><strong>Funcionário:</strong> ${escaparHtml(contextoRelatorio.nome)} &nbsp; | &nbsp; <strong>Regime:</strong> ${regime}h diárias &nbsp; | &nbsp; <strong>Período:</strong> ${formatarDataCurta(inicio)} a ${formatarDataCurta(fim)}</p>
+      <p><strong>Funcionário:</strong> ${escaparHtml(contextoRelatorio.nome)} &nbsp; | &nbsp; <strong>Período:</strong> ${formatarDataCurta(inicio)} a ${formatarDataCurta(fim)}</p>
     </div>
     <table class="tabela-relatorio">
       <thead><tr>
-        <th>Data</th><th>Dia</th><th>Marcações</th><th>Local</th><th>Atividade</th>
+        <th>Data</th><th>Dia</th><th>Marcações</th><th>Local</th><th>Atividade</th><th>Regime</th>
         <th class="numero">Trabalhado</th><th class="numero">Extra 50%</th><th class="numero">Extra 100%</th>
       </tr></thead>
       <tbody>
@@ -659,13 +716,14 @@ function montarFolhaImpressao(inicio, fim, linhas, totais, regime) {
             <td>${l.regsDia.map(r => `${r.tipo === "entrada" ? "E" : "S"} ${formatarHora(r.data_hora)}`).join(" · ")}${l.incompleto ? " (aberto)" : ""}</td>
             <td>${l.locais.map(escaparHtml).join("; ") || "—"}</td>
             <td>${l.atividades.map(escaparHtml).join("; ")}</td>
+            <td>${l.regime}h</td>
             <td class="numero">${horasParaTexto(l.horas)}</td>
             <td class="numero">${l.extras.extra50 > 0 ? horasParaTexto(l.extras.extra50) : "—"}</td>
             <td class="numero">${l.extras.extra100 > 0 ? horasParaTexto(l.extras.extra100) : "—"}</td>
           </tr>`).join("")}
       </tbody>
       <tfoot>
-        <tr><td colspan="5"><strong>Totais</strong></td>
+        <tr><td colspan="6"><strong>Totais</strong></td>
           <td class="numero"><strong>${horasParaTexto(totais.totalNormal)}</strong></td>
           <td class="numero"><strong>${horasParaTexto(totais.totalExtra50)}</strong></td>
           <td class="numero"><strong>${horasParaTexto(totais.totalExtra100)}</strong></td>
@@ -687,7 +745,7 @@ async function renderizarAbaEquipe() {
     <div class="cartao">
       <h2>Funcionários cadastrados</h2>
       <table class="tabela-relatorio">
-        <thead><tr><th>Nome</th><th>Usuário</th><th>Regime</th><th>Situação</th><th></th></tr></thead>
+        <thead><tr><th>Nome</th><th>Usuário</th><th>Regime padrão</th><th>Situação</th><th></th></tr></thead>
         <tbody>
           ${funcionariosCache.map(f => `
             <tr>
