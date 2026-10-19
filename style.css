@@ -108,6 +108,10 @@ header.topo button.secundario:hover:not(:disabled) { background: rgba(255, 255, 
   font-size: 0.72rem; font-weight: 700; padding: 0.15em 0.5em; border-radius: var(--raio);
 }
 
+.regime-topo { display: flex; align-items: center; gap: 0.4em; margin: 0; font-size: 0.8rem; color: #b9c9d8; font-weight: 600; }
+.regime-topo select { width: auto; padding: 0.3em 0.4em; font-size: 0.85rem; }
+table.tabela-relatorio select { width: auto; padding: 0.3em 0.4em; font-size: 0.85rem; }
+
 /* ---------- layout geral ---------- */
 main.conteudo {
   max-width: 880px;

@@ -3,7 +3,8 @@ const SUPABASE_URL = "https://snmxqbxbjqfdfabrszzn.supabase.co";
 const SUPABASE_KEY = "sb_publishable_yoBvT75tfowXyPLXx3wjbQ_eNs1FH-_";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-const JORNADA_DIARIA_HORAS = 8; // 8h/dia, 40h/semana
+const REGIMES_HORAS = [6, 8]; // regimes de jornada diária possíveis
+const REGIME_PADRAO = 8;
 
 const DIAS_SEMANA = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
 const MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
@@ -140,10 +141,10 @@ function calcularPeriodo(registrosOrdenados) {
   return porDia;
 }
 
-function calcularExtras(horasTrabalhadas, tipoDia) {
+function calcularExtras(horasTrabalhadas, tipoDia, jornadaDiaria = REGIME_PADRAO) {
   if (tipoDia === "normal") {
-    const normal = Math.min(horasTrabalhadas, JORNADA_DIARIA_HORAS);
-    const extra50 = Math.max(0, horasTrabalhadas - JORNADA_DIARIA_HORAS);
+    const normal = Math.min(horasTrabalhadas, jornadaDiaria);
+    const extra50 = Math.max(0, horasTrabalhadas - jornadaDiaria);
     return { normal, extra50, extra100: 0 };
   }
   return { normal: 0, extra50: 0, extra100: horasTrabalhadas };
@@ -157,9 +158,26 @@ async function carregarFeriados() {
 }
 
 async function carregarFuncionarios() {
-  const { data, error } = await sb.from("funcionarios").select("id, nome, usuario, is_admin, ativo").order("nome");
+  const { data, error } = await sb.from("funcionarios").select("id, nome, usuario, is_admin, ativo, regime_horas").order("nome");
   if (error) { console.error(error); return; }
   funcionariosCache = data;
+}
+
+function regimeValido(v) {
+  const n = Number(v);
+  return REGIMES_HORAS.includes(n) ? n : REGIME_PADRAO;
+}
+
+async function buscarRegime(funcionarioId) {
+  const { data, error } = await sb.from("funcionarios").select("regime_horas").eq("id", funcionarioId).maybeSingle();
+  if (error || !data) return REGIME_PADRAO;
+  return regimeValido(data.regime_horas);
+}
+
+async function definirRegime(funcionarioId, regime) {
+  const { error } = await sb.from("funcionarios").update({ regime_horas: regimeValido(regime) }).eq("id", funcionarioId);
+  if (error) { alert("Não foi possível alterar o regime. Tente novamente."); return false; }
+  return true;
 }
 
 async function buscarRegistrosPeriodo(funcionarioId, dataInicio, dataFim) {
@@ -198,16 +216,16 @@ async function buscarLocaisConhecidos() {
 
 // ---------- Autenticação ----------
 async function tentarLogin(usuario, senha) {
-  const { data, error } = await sb.rpc("login_funcionario", { p_usuario: usuario, p_senha: senha });
+  const { data, error } = await sb.rpc("login_funcionario_v2", { p_usuario: usuario, p_senha: senha });
   if (error) return { ok: false, mensagem: "Não foi possível entrar. Tente novamente." };
   if (!data || data.length === 0) return { ok: false, mensagem: "Usuário ou senha incorretos." };
   const f = data[0];
-  salvarSessao({ id: f.id, nome: f.nome, usuario: f.usuario, is_admin: f.is_admin });
+  salvarSessao({ id: f.id, nome: f.nome, usuario: f.usuario, is_admin: f.is_admin, regime_horas: regimeValido(f.regime_horas) });
   return { ok: true };
 }
 
-async function tentarCadastro(nome, usuario, senha) {
-  const { data, error } = await sb.rpc("cadastrar_funcionario", { p_usuario: usuario, p_nome: nome, p_senha: senha });
+async function tentarCadastro(nome, usuario, senha, regime) {
+  const { data, error } = await sb.rpc("cadastrar_funcionario_v2", { p_usuario: usuario, p_nome: nome, p_senha: senha, p_regime_horas: regimeValido(regime) });
   if (error) {
     if (String(error.message).includes("duplicate") || error.code === "23505") {
       return { ok: false, mensagem: "Esse nome de usuário já está cadastrado." };
@@ -215,7 +233,7 @@ async function tentarCadastro(nome, usuario, senha) {
     return { ok: false, mensagem: "Não foi possível cadastrar. Tente novamente." };
   }
   const f = data[0];
-  salvarSessao({ id: f.id, nome: f.nome, usuario: f.usuario, is_admin: f.is_admin });
+  salvarSessao({ id: f.id, nome: f.nome, usuario: f.usuario, is_admin: f.is_admin, regime_horas: regimeValido(f.regime_horas) });
   return { ok: true };
 }
 
@@ -261,6 +279,14 @@ function renderizarLogin(erro = "", modo = "entrar") {
             <div class="campo">
               <label for="c-nome">Nome completo</label>
               <input id="c-nome" required>
+            </div>
+            <div class="campo">
+              <label for="c-regime">Regime de horário</label>
+              <select id="c-regime">
+                <option value="8">8 horas diárias (40 h semanais)</option>
+                <option value="6">6 horas diárias (30 h semanais)</option>
+              </select>
+              <p class="aviso">Horas acima da jornada diária contam como extra de 50%.</p>
             </div>` : ""}
           <div class="campo">
             <label for="c-usuario">Usuário</label>
@@ -300,7 +326,7 @@ function renderizarLogin(erro = "", modo = "entrar") {
         renderizarLogin("Preencha nome, usuário e uma senha com ao menos 4 caracteres.", "cadastrar");
         return;
       }
-      resultado = await tentarCadastro(nome, usuario, senha);
+      resultado = await tentarCadastro(nome, usuario, senha, document.getElementById("c-regime").value);
     } else {
       resultado = await tentarLogin(usuario, senha);
     }
@@ -313,6 +339,8 @@ function renderizarLogin(erro = "", modo = "entrar") {
 
 // ---------- Aplicação principal ----------
 async function renderizarApp() {
+  const regimeAtual = await buscarRegime(sessao.id);
+  if (regimeAtual !== sessao.regime_horas) salvarSessao({ ...sessao, regime_horas: regimeAtual });
   raiz.innerHTML = `
     <header class="topo">
       <div class="marca">
@@ -324,6 +352,11 @@ async function renderizarApp() {
       </div>
       <div class="sessao-usuario">
         <button class="secundario oculto" data-botao-instalar>Instalar app</button>
+        <label class="regime-topo" for="sel-regime">Regime
+          <select id="sel-regime">
+            ${REGIMES_HORAS.map(h => `<option value="${h}" ${regimeValido(sessao.regime_horas) === h ? "selected" : ""}>${h}h/dia</option>`).join("")}
+          </select>
+        </label>
         <span class="nome-usuario">${escaparHtml(sessao.nome)}</span>
         ${sessao.is_admin ? `<span class="selo-admin">admin</span>` : ""}
         <button class="secundario" id="btn-sair">Sair</button>
@@ -340,6 +373,15 @@ async function renderizarApp() {
     </main>
   `;
   document.getElementById("btn-sair").addEventListener("click", encerrarSessao);
+  document.getElementById("sel-regime").addEventListener("change", async (ev) => {
+    const novo = regimeValido(ev.target.value);
+    if (await definirRegime(sessao.id, novo)) {
+      salvarSessao({ ...sessao, regime_horas: novo });
+      if (abaAtiva === "relatorio") renderizarAba();
+    } else {
+      ev.target.value = regimeValido(sessao.regime_horas);
+    }
+  });
   raiz.querySelectorAll("[data-botao-instalar]").forEach((btn) => btn.addEventListener("click", acionarInstalacao));
   atualizarBotaoInstalar();
   raiz.querySelectorAll("nav.abas button").forEach(b => {
@@ -514,6 +556,7 @@ async function gerarRelatorio() {
   const resultadoEl = document.getElementById("resultado-relatorio");
   if (!inicio || !fim || inicio > fim) { resultadoEl.innerHTML = `<p class="mensagem-vazia">Escolha um período válido.</p>`; return; }
 
+  const regime = await buscarRegime(contextoRelatorio.funcionarioId);
   const registros = await buscarRegistrosPeriodo(contextoRelatorio.funcionarioId, inicio, fim);
   const ordenados = [...registros].sort((a, b) => new Date(a.data_hora) - new Date(b.data_hora));
   const porDia = calcularPeriodo(ordenados);
@@ -528,7 +571,7 @@ async function gerarRelatorio() {
     const dataObj = new Date(a, m - 1, di);
     const classe = classificarDia(dataObj);
     const horas = info.minutos / 60;
-    const extras = calcularExtras(horas, classe.tipo);
+    const extras = calcularExtras(horas, classe.tipo, regime);
     totalNormal += extras.normal; totalExtra50 += extras.extra50; totalExtra100 += extras.extra100;
     if (info.incompleto) temPendencia = true;
     const regsDia = [...info.marcacoes].sort((x, y) => new Date(x.data_hora) - new Date(y.data_hora));
@@ -599,7 +642,7 @@ function montarFolhaImpressao(inicio, fim, linhas, totais) {
       ${svgBrasao(34)}
       <h2>Relatório de Ponto</h2>
       <p>Município de Clevelândia — PR</p>
-      <p><strong>Funcionário:</strong> ${escaparHtml(contextoRelatorio.nome)} &nbsp; | &nbsp; <strong>Período:</strong> ${formatarDataCurta(inicio)} a ${formatarDataCurta(fim)}</p>
+      <p><strong>Funcionário:</strong> ${escaparHtml(contextoRelatorio.nome)} &nbsp; | &nbsp; <strong>Regime:</strong> ${regime}h diárias &nbsp; | &nbsp; <strong>Período:</strong> ${formatarDataCurta(inicio)} a ${formatarDataCurta(fim)}</p>
     </div>
     <table class="tabela-relatorio">
       <thead><tr>
@@ -642,12 +685,17 @@ async function renderizarAbaEquipe() {
     <div class="cartao">
       <h2>Funcionários cadastrados</h2>
       <table class="tabela-relatorio">
-        <thead><tr><th>Nome</th><th>Usuário</th><th>Situação</th><th></th></tr></thead>
+        <thead><tr><th>Nome</th><th>Usuário</th><th>Regime</th><th>Situação</th><th></th></tr></thead>
         <tbody>
           ${funcionariosCache.map(f => `
             <tr>
               <td>${escaparHtml(f.nome)} ${f.is_admin ? `<span class="selo-admin">admin</span>` : ""}</td>
               <td>${escaparHtml(f.usuario)}</td>
+              <td>
+                <select data-regime-func="${f.id}" aria-label="Regime de ${escaparHtml(f.nome)}">
+                  ${REGIMES_HORAS.map(h => `<option value="${h}" ${regimeValido(f.regime_horas) === h ? "selected" : ""}>${h}h/dia</option>`).join("")}
+                </select>
+              </td>
               <td>${f.ativo ? "Ativo" : "Inativo"}</td>
               <td>
                 <button class="link-like" data-ver-relatorio="${f.id}" data-nome="${escaparHtml(f.nome)}">ver relatório</button>
@@ -664,6 +712,17 @@ async function renderizarAbaEquipe() {
       abaAtiva = "relatorio";
       atualizarAbaAtiva();
       renderizarAba();
+    });
+  });
+  alvo.querySelectorAll("[data-regime-func]").forEach(sel => {
+    sel.addEventListener("change", async () => {
+      const ok = await definirRegime(sel.dataset.regimeFunc, sel.value);
+      if (ok && sel.dataset.regimeFunc === sessao.id) {
+        salvarSessao({ ...sessao, regime_horas: regimeValido(sel.value) });
+        const topo = document.getElementById("sel-regime");
+        if (topo) topo.value = String(regimeValido(sel.value));
+      }
+      renderizarAbaEquipe();
     });
   });
   alvo.querySelectorAll("[data-alternar-ativo]").forEach(btn => {
