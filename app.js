@@ -618,7 +618,7 @@ async function gerarRelatorio() {
     <button class="primario nao-imprime" id="btn-imprimir" style="margin-top:1.2em">Gerar relatório para impressão</button>
   `;
 
-  montarFolhaImpressao(inicio, fim, linhas, { totalNormal, totalExtra50, totalExtra100 });
+  montarFolhaImpressao(inicio, fim, linhas, { totalNormal, totalExtra50, totalExtra100 }, regime);
   document.getElementById("btn-imprimir").addEventListener("click", () => window.print());
 
   if (sessao.is_admin) {
@@ -635,7 +635,7 @@ async function gerarRelatorio() {
   }
 }
 
-function montarFolhaImpressao(inicio, fim, linhas, totais) {
+function montarFolhaImpressao(inicio, fim, linhas, totais, regime) {
   const folha = document.getElementById("folha-impressao");
   folha.innerHTML = `
     <div class="cabecalho-impresso">

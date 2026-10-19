@@ -1,4 +1,4 @@
-const CACHE_NOME = "ponto-clevelandia-v2";
+const CACHE_NOME = "ponto-clevelandia-v3";
 const ARQUIVOS_DA_CASCA = [
   "./",
   "./index.html",
