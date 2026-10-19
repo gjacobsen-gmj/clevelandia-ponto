@@ -457,7 +457,9 @@ async function renderizarAbaPonto() {
   if (intervaloRelogio) clearInterval(intervaloRelogio);
   const atualizarRelogio = () => {
     const agora = new Date();
-    document.getElementById("relogio-hora").textContent = `${pad(agora.getHours())}:${pad(agora.getMinutes())}:${pad(agora.getSeconds())}`;
+    const elHora = document.getElementById("relogio-hora");
+    if (!elHora) { clearInterval(intervaloRelogio); return; }
+    elHora.textContent = `${pad(agora.getHours())}:${pad(agora.getMinutes())}:${pad(agora.getSeconds())}`;
     document.getElementById("relogio-data").textContent = formatarDataLonga(agora);
   };
   atualizarRelogio();
